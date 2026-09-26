@@ -39,6 +39,7 @@ class ReservationService:
         service = KorailService()
         deadline = asyncio.get_running_loop().time() + settings.korail_max_search_minutes * 60
         try:
+            await asyncio.to_thread(service.login, job.session)
             while asyncio.get_running_loop().time() < deadline:
                 if job.cancel_event.is_set(): return
                 result = await asyncio.to_thread(service.reserve_once, job.session)
@@ -68,5 +69,6 @@ class ReservationService:
             log.exception("Reservation failed: job_id=%s", job.job_id)
             await notify(job)
         finally:
+            await asyncio.to_thread(service.close)
             job.completed_at = datetime.now(timezone.utc)
             state.running_tasks.pop(job.job_id, None)

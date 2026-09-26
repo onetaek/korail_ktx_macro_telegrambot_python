@@ -30,53 +30,52 @@ class KorailService:
             raise RuntimeError("korail-mobile-api is not installed") from exc
         self.client_type = KorailClient
         self.query_type = TrainSearchQuery
+        self.client = self.client_type()
 
-    def _client(self):
-        return self.client_type()
+    def login(self, session: ConversationSession) -> None:
+        log.info("Korail login started: user_type=%s", self._user_type(session.korail_id or ""))
+        self.client.login(session.korail_id, session.password)
+        log.info("Korail login completed")
 
     def reserve_once(self, session: ConversationSession) -> ReservationResult | None:
-        client = self._client()
-        try:
-            log.info("Korail login started: user_type=%s", self._user_type(session.korail_id or ""))
-            client.login(session.korail_id, session.password)
-            log.info("Korail login completed")
-            query = self.query_type(
-                departure_station_code=session.source_station,
-                arrival_station_code=session.destination_station,
-                departure_date=session.departure_date,
-                departure_time=f"{session.start_time}00",
-                passengers=session.passenger_count,
-                train_group_code="100" if session.train_type == "KTX" else "109",
-            )
-            log.info("Train search started: route=%s->%s, date=%s, start=%s",
-                     session.source_station, session.destination_station,
-                     session.departure_date, session.start_time)
-            result = client.search_trains(query)
-            trains = list(getattr(result, "trains", result or []))
-            filtered = [train for train in trains if self._within_max_time(train, session.max_time)]
-            log.info("Search completed: count=%d, filtered_count=%d", len(trains), len(filtered))
-            for train in filtered:
-                if self._seat_available(train, session.seat_option):
-                    log.info("Train selected: train_no=%s, departure=%s", self._field(train, "train_no"), self._field(train, "departure_time"))
-                    log.info("Reservation request started")
-                    try:
-                        from korail_mobile_api import KorailPassengerCounts, KorailSeatClass
-                        seat_class = KorailSeatClass.SPECIAL if session.seat_option.startswith("SPECIAL") else KorailSeatClass.GENERAL
-                        passengers = KorailPassengerCounts(adult=session.passenger_count)
-                        hold = client.reserve(train, seat_class=seat_class, passengers=passengers)
-                    except TypeError:
-                        hold = client.reserve(train)
-                    number = self._field(hold, "pnr") or self._field(hold, "reservation_number")
-                    log.info("Reservation completed: reservation_number_present=%s", bool(number))
-                    return ReservationResult("미결제 예약이 완료되었습니다. 공식 앱/웹에서 결제를 진행하세요.", number)
-            return None
-        finally:
-            clear = getattr(client, "clear_session", None)
-            close = getattr(client, "close", None)
-            if clear:
-                clear()
-            if close:
-                close()
+        query = self.query_type(
+            departure_station_code=session.source_station,
+            arrival_station_code=session.destination_station,
+            departure_date=session.departure_date,
+            departure_time=f"{session.start_time}00",
+            passengers=session.passenger_count,
+            train_group_code="100" if session.train_type == "KTX" else "109",
+        )
+        log.info("Train search started: route=%s->%s, date=%s, start=%s",
+                 session.source_station, session.destination_station,
+                 session.departure_date, session.start_time)
+        result = self.client.search_trains(query)
+        trains = list(getattr(result, "trains", result or []))
+        filtered = [train for train in trains if self._within_max_time(train, session.max_time)]
+        log.info("Search completed: count=%d, filtered_count=%d", len(trains), len(filtered))
+        for train in filtered:
+            if self._seat_available(train, session.seat_option):
+                log.info("Train selected: train_no=%s, departure=%s", self._field(train, "train_no"), self._field(train, "departure_time"))
+                log.info("Reservation request started")
+                try:
+                    from korail_mobile_api import KorailPassengerCounts, KorailSeatClass
+                    seat_class = KorailSeatClass.SPECIAL if session.seat_option.startswith("SPECIAL") else KorailSeatClass.GENERAL
+                    passengers = KorailPassengerCounts(adult=session.passenger_count)
+                    hold = self.client.reserve(train, seat_class=seat_class, passengers=passengers)
+                except TypeError:
+                    hold = self.client.reserve(train)
+                number = self._field(hold, "pnr") or self._field(hold, "reservation_number")
+                log.info("Reservation completed: reservation_number_present=%s", bool(number))
+                return ReservationResult("미결제 예약이 완료되었습니다. 공식 앱/웹에서 결제를 진행하세요.", number)
+        return None
+
+    def close(self) -> None:
+        clear = getattr(self.client, "clear_session", None)
+        close = getattr(self.client, "close", None)
+        if clear:
+            clear()
+        if close:
+            close()
 
     @staticmethod
     def _user_type(value: str) -> str:
