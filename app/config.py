@@ -8,7 +8,6 @@ class Settings(BaseSettings):
     korail_search_jitter_min_seconds: float = 0.0
     korail_search_jitter_max_seconds: float = 0.0
     korail_max_search_minutes: int = 10
-    korail_netfunnel_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
