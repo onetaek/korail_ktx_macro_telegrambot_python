@@ -1,0 +1,6 @@
+python-telegram-bot>=22,<23
+pydantic-settings>=2.7,<3
+httpx>=0.28,<1
+cryptography>=42,<47
+git+https://github.com/yakisoba0728/korail-mobile-api.git
+pytest>=8,<9
