@@ -4,6 +4,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_allowed_chat_ids: str = ""
+    korail_id: str = ""
+    korail_password: str = ""
     korail_search_interval_seconds: float = 1.0
     korail_search_jitter_min_seconds: float = 0.0
     korail_search_jitter_max_seconds: float = 0.0

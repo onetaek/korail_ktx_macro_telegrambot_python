@@ -33,8 +33,8 @@ class KorailService:
         self.client = self.client_type()
 
     def login(self, session: ConversationSession) -> None:
-        log.info("Korail login started: user_type=%s", self._user_type(session.korail_id or ""))
-        self.client.login(session.korail_id, session.password)
+        log.info("Korail login started: user_type=%s", self._user_type(settings.korail_id))
+        self.client.login(settings.korail_id, settings.korail_password)
         log.info("Korail login completed")
 
     def reserve_once(self, session: ConversationSession) -> ReservationResult | None:
@@ -54,20 +54,81 @@ class KorailService:
         filtered = [train for train in trains if self._within_max_time(train, session.max_time)]
         log.info("Search completed: count=%d, filtered_count=%d", len(trains), len(filtered))
         for train in filtered:
+            if session.selected_train_numbers and str(self._field(train, "train_no")) not in session.selected_train_numbers:
+                continue
             if self._seat_available(train, session.seat_option):
                 log.info("Train selected: train_no=%s, departure=%s", self._field(train, "train_no"), self._field(train, "departure_time"))
                 log.info("Reservation request started")
                 try:
-                    from korail_mobile_api import KorailPassengerCounts, KorailSeatClass
-                    seat_class = KorailSeatClass.SPECIAL if session.seat_option.startswith("SPECIAL") else KorailSeatClass.GENERAL
+                    from korail_mobile_api import (
+                        KorailPassengerCounts,
+                        KorailSeatClass,
+                    )
+                    selected_class = self._seat_class_for_train(train, session.seat_option)
+                    if selected_class == "SPECIAL":
+                        seat_class = KorailSeatClass.SPECIAL
+                    else:
+                        seat_class = KorailSeatClass.GENERAL
                     passengers = KorailPassengerCounts(adult=session.passenger_count)
                     hold = self.client.reserve(train, seat_class=seat_class, passengers=passengers)
                 except TypeError:
                     hold = self.client.reserve(train)
+                except Exception as exc:
+                    from korail_mobile_api.errors import KorailSoldOutError
+
+                    if isinstance(exc, KorailSoldOutError):
+                        log.info(
+                            "Reservation seat sold out; retrying: code=%s, message=%s",
+                            getattr(exc, "code", None),
+                            getattr(exc, "message", str(exc)),
+                        )
+                        continue
+                    raise
                 number = self._field(hold, "pnr") or self._field(hold, "reservation_number")
                 log.info("Reservation completed: reservation_number_present=%s", bool(number))
                 return ReservationResult("미결제 예약이 완료되었습니다. 공식 앱/웹에서 결제를 진행하세요.", number)
         return None
+
+    def preview(self, session: ConversationSession) -> list[object]:
+        self.login(session)
+        query = self.query_type(
+            departure_station_code=session.source_station,
+            arrival_station_code=session.destination_station,
+            departure_date=session.departure_date,
+            departure_time=f"{session.start_time}00",
+            passengers=session.passenger_count,
+            train_group_code="100" if session.train_type == "KTX" else "109",
+        )
+        result = self.client.search_trains(query)
+        trains = list(getattr(result, "trains", result or []))
+        return [train for train in trains if self._within_max_time(train, session.max_time)]
+
+    def train_summary(self, train: object) -> str:
+        departure = str(self._field(train, "departure_time") or "")[:4]
+        arrival = str(self._field(train, "arrival_time") or "")[:4]
+        return (
+            f"{self._field(train, 'train_name') or self._field(train, 'train_group_name') or '열차'} "
+            f"{self._field(train, 'train_no') or '-'} | "
+            f"출발 {self._format_time(departure)} → 도착 {self._format_time(arrival)} | "
+            f"{self._duration_text(departure, arrival)}"
+        )
+
+    @staticmethod
+    def _format_time(value: str) -> str:
+        if len(value) == 4 and value.isdigit():
+            return f"{value[:2]}시 {value[2:]}분"
+        return "시간 미상"
+
+    @staticmethod
+    def _duration_text(departure: str, arrival: str) -> str:
+        if len(departure) != 4 or len(arrival) != 4 or not departure.isdigit() or not arrival.isdigit():
+            return "소요시간 미상"
+        departure_minutes = int(departure[:2]) * 60 + int(departure[2:])
+        arrival_minutes = int(arrival[:2]) * 60 + int(arrival[2:])
+        if arrival_minutes < departure_minutes:
+            arrival_minutes += 24 * 60
+        duration = arrival_minutes - departure_minutes
+        return f"{duration // 60}시간 {duration % 60}분 소요"
 
     def close(self) -> None:
         clear = getattr(self.client, "clear_session", None)
@@ -93,6 +154,9 @@ class KorailService:
         return value.isdigit() and int(value) <= int(max_time)
 
     def _seat_available(self, train, option: str) -> bool:
+        return self._seat_class_for_train(train, option) is not None
+
+    def _seat_class_for_train(self, train, option: str) -> str | None:
         general_code = self._field(train, "general_reservation_code")
         special_code = self._field(train, "special_reservation_code")
         general_flag = self._field(train, "general_reservation_flag")
@@ -101,7 +165,14 @@ class KorailService:
         special = special_code == "11" or special_flag in {"Y", "11"}
         log.info("Seat availability: train_no=%s, general_code=%s, general_flag=%s, special_code=%s, special_flag=%s",
                  self._field(train, "train_no"), general_code, general_flag, special_code, special_flag)
-        if option == "GENERAL_ONLY": return general
-        if option == "SPECIAL_ONLY": return special
-        if option == "SPECIAL_FIRST": return special or general
-        return general or special
+        if option == "GENERAL_ONLY":
+            return "GENERAL" if general else None
+        if option == "SPECIAL_ONLY":
+            return "SPECIAL" if special else None
+        if option == "SPECIAL_FIRST":
+            if special:
+                return "SPECIAL"
+            return "GENERAL" if general else None
+        if general:
+            return "GENERAL"
+        return "SPECIAL" if special else None

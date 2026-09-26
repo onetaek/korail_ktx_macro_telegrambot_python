@@ -5,18 +5,12 @@ from .models import ConversationSession, ConversationState
 
 
 def reset() -> ConversationSession:
-    return ConversationSession(state=ConversationState.WAITING_FOR_KORAIL_ID)
+    return ConversationSession(state=ConversationState.WAITING_FOR_DATE)
 
 
 def accept(session: ConversationSession, text: str) -> str:
     value = text.strip()
     state = session.state
-    if state == ConversationState.WAITING_FOR_KORAIL_ID:
-        session.korail_id = value; session.state = ConversationState.WAITING_FOR_PASSWORD
-        return "코레일 비밀번호를 입력하세요."
-    if state == ConversationState.WAITING_FOR_PASSWORD:
-        session.password = value; session.state = ConversationState.WAITING_FOR_DATE
-        return "출발일을 YYYYMMDD 형식으로 입력하세요."
     if state == ConversationState.WAITING_FOR_DATE:
         datetime.strptime(value, "%Y%m%d"); session.departure_date = value; session.state = ConversationState.WAITING_FOR_SOURCE
         return "출발역을 입력하세요."
@@ -45,12 +39,13 @@ def accept(session: ConversationSession, text: str) -> str:
         return "탑승 인원 수를 입력하세요. (1~9)"
     if state == ConversationState.WAITING_FOR_PASSENGER_COUNT:
         if not value.isdigit() or not 1 <= int(value) <= 9: raise ValueError("탑승 인원은 1~9명입니다.")
-        session.passenger_count = int(value); session.state = ConversationState.WAITING_FOR_CONFIRMATION
-        return summary(session) + "\n예약을 시작하려면 Y, 취소하려면 N을 입력하세요."
-    if state == ConversationState.WAITING_FOR_CONFIRMATION:
-        if value.lower() not in {"y", "예"}: raise ValueError("예약을 취소했습니다.")
+        session.passenger_count = int(value); session.state = ConversationState.WAITING_FOR_TRAIN_SELECTION
+        return summary(session) + "\n열차 목록을 조회합니다. 잠시 기다려주세요."
+    if state == ConversationState.WAITING_FOR_TRAIN_SELECTION:
+        selected = _parse_train_selection(value, len(session.candidate_train_numbers))
+        session.selected_train_numbers = [session.candidate_train_numbers[index - 1] for index in selected]
         session.state = ConversationState.RESERVING
-        return "예약 검색을 시작합니다."
+        return f"선택한 열차 {', '.join(map(str, selected))}번의 예약 검색을 시작합니다."
     raise ValueError("현재 입력을 처리할 수 없습니다. /start로 다시 시작하세요.")
 
 
@@ -58,7 +53,17 @@ def _validate_time(value: str) -> None:
     if not re.fullmatch(r"(?:[01]\d|2[0-3])[0-5]\d", value): raise ValueError("시간은 HHMM 형식이어야 합니다.")
 
 
+def _parse_train_selection(value: str, count: int) -> list[int]:
+    try:
+        numbers = [int(item.strip()) for item in value.split(",") if item.strip()]
+    except ValueError as exc:
+        raise ValueError("예약할 열차 번호를 3 또는 1,4,6 형식으로 입력하세요.") from exc
+    numbers = sorted(set(numbers))
+    if not numbers or any(number < 1 or number > count for number in numbers):
+        raise ValueError(f"열차 번호는 1~{count} 범위에서 입력하세요.")
+    return numbers
+
+
 def summary(s: ConversationSession) -> str:
     return (f"출발일: {s.departure_date}\n출발: {s.source_station}\n도착: {s.destination_station}\n"
             f"시간: {s.start_time}~{s.max_time}\n열차: {s.train_type}\n좌석: {s.seat_option}\n인원: {s.passenger_count}명")
-

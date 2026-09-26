@@ -16,6 +16,8 @@ log = logging.getLogger(__name__)
 async def main() -> None:
     if not settings.telegram_bot_token or not settings.allowed_chat_ids():
         raise RuntimeError("TELEGRAM_BOT_TOKEN과 TELEGRAM_ALLOWED_CHAT_IDS를 설정해야 합니다.")
+    if not settings.korail_id or not settings.korail_password:
+        raise RuntimeError("KORAIL_ID와 KORAIL_PASSWORD를 설정해야 합니다.")
 
     telegram_bot = TelegramBot()
     await telegram_bot.run()

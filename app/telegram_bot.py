@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
@@ -5,6 +6,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 from . import conversation, state
 from .config import settings
 from .models import ConversationState, JobStatus
+from .korail_service import KorailService
 from .reservation_service import ReservationService
 
 log = logging.getLogger(__name__)
@@ -29,7 +31,7 @@ class TelegramBot:
         if not self.allowed(chat_id): await update.message.reply_text("허용되지 않은 사용자입니다."); return
         state.conversation_sessions[chat_id] = conversation.reset()
         log.info("Conversation started: chat_id=%s", chat_id)
-        await update.message.reply_text("코레일 ID를 입력하세요.")
+        await update.message.reply_text("출발일을 YYYYMMDD 형식으로 입력하세요.")
 
     async def message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
@@ -40,12 +42,29 @@ class TelegramBot:
             reply = conversation.accept(session, update.message.text)
             log.info("Conversation state changed: chat_id=%s, state=%s", chat_id, session.state.value)
             await update.message.reply_text(reply)
+            if session.state == ConversationState.WAITING_FOR_TRAIN_SELECTION:
+                await self.send_train_preview(session, chat_id)
             if session.state == ConversationState.RESERVING:
                 job = self.service.create(chat_id, session)
                 session.job_id = job.job_id
                 self.service.start(job, self.notify)
         except ValueError as exc:
             await update.message.reply_text(str(exc))
+
+    async def send_train_preview(self, session, chat_id: int) -> None:
+        service = KorailService()
+        try:
+            trains = await asyncio.to_thread(service.preview, session)
+            if not trains:
+                session.state = ConversationState.WAITING_FOR_TRAIN_SELECTION
+                await self.application.bot.send_message(chat_id, "조건에 맞는 열차가 없습니다. /start로 다시 시도하세요.")
+                return
+            session.candidate_train_numbers = [str(service._field(train, "train_no")) for train in trains]
+            lines = ["예약을 시도할 열차 번호를 입력하세요. 예: 3 또는 1,4,6"]
+            lines.extend(f"{index}. {service.train_summary(train)}" for index, train in enumerate(trains, 1))
+            await self.application.bot.send_message(chat_id, "\n".join(lines))
+        finally:
+            await asyncio.to_thread(service.close)
 
     async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
@@ -76,4 +95,3 @@ class TelegramBot:
     async def stop(self) -> None:
         if self.application.updater: await self.application.updater.stop()
         await self.application.stop(); await self.application.shutdown()
-

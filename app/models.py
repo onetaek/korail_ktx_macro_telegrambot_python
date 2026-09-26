@@ -6,8 +6,6 @@ from typing import Any
 
 class ConversationState(str, Enum):
     IDLE = "IDLE"
-    WAITING_FOR_KORAIL_ID = "WAITING_FOR_KORAIL_ID"
-    WAITING_FOR_PASSWORD = "WAITING_FOR_PASSWORD"
     WAITING_FOR_DATE = "WAITING_FOR_DATE"
     WAITING_FOR_SOURCE = "WAITING_FOR_SOURCE"
     WAITING_FOR_DESTINATION = "WAITING_FOR_DESTINATION"
@@ -16,7 +14,7 @@ class ConversationState(str, Enum):
     WAITING_FOR_TRAIN_TYPE = "WAITING_FOR_TRAIN_TYPE"
     WAITING_FOR_SEAT_OPTION = "WAITING_FOR_SEAT_OPTION"
     WAITING_FOR_PASSENGER_COUNT = "WAITING_FOR_PASSENGER_COUNT"
-    WAITING_FOR_CONFIRMATION = "WAITING_FOR_CONFIRMATION"
+    WAITING_FOR_TRAIN_SELECTION = "WAITING_FOR_TRAIN_SELECTION"
     RESERVING = "RESERVING"
 
 
@@ -31,8 +29,6 @@ class JobStatus(str, Enum):
 @dataclass
 class ConversationSession:
     state: ConversationState = ConversationState.IDLE
-    korail_id: str | None = None
-    password: str | None = None
     departure_date: str | None = None
     source_station: str | None = None
     destination_station: str | None = None
@@ -41,6 +37,8 @@ class ConversationSession:
     train_type: str = "KTX"
     seat_option: str = "GENERAL_FIRST"
     passenger_count: int = 1
+    candidate_train_numbers: list[str] = field(default_factory=list)
+    selected_train_numbers: list[str] = field(default_factory=list)
     job_id: str | None = None
 
 
@@ -55,4 +53,3 @@ class ReservationJob:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
     cancel_event: Any = None
-

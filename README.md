@@ -29,6 +29,45 @@ python -m app.main
 
 예약이 끝나거나 프로그램을 종료하려면 실행 중인 PowerShell 창에서 `Ctrl+C`를 누릅니다.
 
+## Docker로 실행하기
+
+Docker Desktop이 설치된 Windows PC에서는 Python 가상환경을 직접 만들지 않고 컨테이너로 실행할 수 있습니다. 이미지에는 GitHub에서 설치하는 `korail-mobile-api`와 필요한 Python 패키지가 포함됩니다.
+
+먼저 `.env`를 준비합니다.
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+이미지를 빌드하고 컨테이너를 실행합니다.
+
+```powershell
+docker build -t korail-telegram-bot .
+docker run --name korail-telegram-bot --env-file .env korail-telegram-bot
+```
+
+실행 중인 로그를 확인합니다.
+
+```powershell
+docker logs -f korail-telegram-bot
+```
+
+컨테이너를 종료하고 삭제합니다.
+
+```powershell
+docker stop korail-telegram-bot
+docker rm korail-telegram-bot
+```
+
+코드나 의존성을 변경한 뒤에는 이미지를 다시 빌드합니다.
+
+```powershell
+docker build --no-cache -t korail-telegram-bot .
+```
+
+예약 상태는 메모리에만 저장되므로 컨테이너를 재시작하거나 삭제하면 진행 중인 대화와 예약 작업이 사라집니다.
+
 - Python 3.11 이상
 - Telegram Long Polling과 예약 작업을 하나의 프로세스에서 실행
 - 열차 조회 후 미결제 예약을 시도하고 Telegram으로 결과 알림
@@ -80,11 +119,13 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-`.env`에서 다음 값을 수정합니다.
+`.env`에서 다음 값을 수정합니다. KORAIL ID와 비밀번호는 Telegram 대화로 입력하지 않고 `.env`에서만 관리합니다.
 
 ```env
 TELEGRAM_BOT_TOKEN=BotFather에서_받은_토큰
 TELEGRAM_ALLOWED_CHAT_IDS=본인의_숫자_chat_id
+KORAIL_ID=코레일_아이디
+KORAIL_PASSWORD=코레일_비밀번호
 ```
 
 Telegram chat ID는 `@userinfobot` 등을 이용해 확인할 수 있습니다. 여러 chat ID를 허용하려면 쉼표로 구분합니다.
@@ -107,7 +148,21 @@ python -m app.main
 
 ## 5. Telegram 사용법
 
-봇 채팅에서 `/start`를 입력한 뒤 안내에 따라 KORAIL ID, 비밀번호, 출발일, 출발역, 도착역, 검색 시간, 열차 종류, 좌석 조건, 승객 수를 입력합니다. 마지막 확인 단계에서 `Y`를 입력하면 예약 작업이 시작됩니다.
+봇 채팅에서 `/start`를 입력한 뒤 안내에 따라 출발일, 출발역, 도착역, 검색 시간, 열차 종류, 좌석 조건, 승객 수를 입력합니다. KORAIL ID와 비밀번호는 `.env`의 `KORAIL_ID`, `KORAIL_PASSWORD`를 사용합니다. 이후 조회된 열차 목록에서 예약할 번호를 입력합니다.
+
+열차 하나만 선택할 때는 다음처럼 입력합니다.
+
+```text
+3
+```
+
+여러 열차를 선택할 때는 쉼표로 구분합니다.
+
+```text
+1,4,6
+```
+
+선택한 열차가 매진되면 선택된 열차만 대상으로 설정된 주기에 따라 예약을 재시도합니다.
 
 지원 명령:
 
