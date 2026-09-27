@@ -18,6 +18,21 @@ class ConversationState(str, Enum):
     RESERVING = "RESERVING"
 
 
+class ConfigState(str, Enum):
+    WAITING_FOR_INTERVAL = "WAITING_FOR_INTERVAL"
+    WAITING_FOR_JITTER_MIN = "WAITING_FOR_JITTER_MIN"
+    WAITING_FOR_JITTER_MAX = "WAITING_FOR_JITTER_MAX"
+    WAITING_FOR_MAX_MINUTES = "WAITING_FOR_MAX_MINUTES"
+
+
+@dataclass
+class ConfigSession:
+    state: ConfigState = ConfigState.WAITING_FOR_INTERVAL
+    interval: float | None = None
+    jitter_min: float | None = None
+    jitter_max: float | None = None
+
+
 class JobStatus(str, Enum):
     CREATED = "CREATED"
     RUNNING = "RUNNING"

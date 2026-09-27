@@ -5,7 +5,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 
 from . import conversation, state
 from .config import settings
-from .models import ConversationState, JobStatus
+from .models import ConfigSession, ConfigState, ConversationState, JobStatus
 from .korail_service import KorailService
 from .reservation_service import ReservationService
 
@@ -19,6 +19,7 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("start", self.start))
         self.application.add_handler(CommandHandler("status", self.status))
         self.application.add_handler(CommandHandler("cancel", self.cancel))
+        self.application.add_handler(CommandHandler("config", self.config))
         self.application.add_handler(CommandHandler("help", self.help))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.message))
 
@@ -36,6 +37,9 @@ class TelegramBot:
     async def message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
         if not self.allowed(chat_id): return
+        if chat_id in state.config_sessions:
+            await self.update_config(update, update.message.text)
+            return
         session = state.conversation_sessions.get(chat_id)
         if not session: await update.message.reply_text("/start로 시작하세요."); return
         try:
@@ -74,6 +78,9 @@ class TelegramBot:
 
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
+        if state.config_sessions.pop(chat_id, None):
+            await update.message.reply_text("설정 변경을 취소했습니다.")
+            return
         session = state.conversation_sessions.get(chat_id)
         if session and session.job_id:
             await self.service.cancel(session.job_id)
@@ -83,7 +90,69 @@ class TelegramBot:
             await update.message.reply_text("현재 입력을 취소했습니다.")
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await update.message.reply_text("/start 예약 시작\n/status 상태 확인\n/cancel 취소")
+        await update.message.reply_text("/start 예약 시작\n/status 상태 확인\n/config 조회 주기 설정\n/cancel 취소")
+
+    async def config(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = update.effective_chat.id
+        if not self.allowed(chat_id):
+            return
+        state.config_sessions[chat_id] = ConfigSession()
+        await update.message.reply_text(
+            "현재 조회 설정입니다.\n"
+            f"기본 주기: {settings.korail_search_interval_seconds:.3f}초\n"
+            f"Jitter 최소: {settings.korail_search_jitter_min_seconds:.3f}초\n"
+            f"Jitter 최대: {settings.korail_search_jitter_max_seconds:.3f}초\n\n"
+            f"최대 실행 시간: {settings.korail_max_search_minutes}분\n\n"
+            "변경할 기본 주기(초)를 입력하세요. 예: 0.5 또는 1"
+        )
+
+    async def update_config(self, update: Update, text: str) -> None:
+        chat_id = update.effective_chat.id
+        config_session = state.config_sessions.get(chat_id)
+        if config_session is None:
+            return
+        try:
+            value = float(text.strip())
+            if value < 0:
+                raise ValueError
+            if config_session.state == ConfigState.WAITING_FOR_INTERVAL:
+                if value <= 0:
+                    raise ValueError("기본 주기는 0보다 큰 숫자여야 합니다.")
+                config_session.interval = value
+                config_session.state = ConfigState.WAITING_FOR_JITTER_MIN
+                await update.message.reply_text("Jitter 최소값(초)을 입력하세요. 예: 0.1")
+                return
+            if config_session.state == ConfigState.WAITING_FOR_JITTER_MIN:
+                config_session.jitter_min = value
+                config_session.state = ConfigState.WAITING_FOR_JITTER_MAX
+                await update.message.reply_text("Jitter 최대값(초)을 입력하세요. 예: 0.5")
+                return
+            if config_session.state == ConfigState.WAITING_FOR_JITTER_MAX:
+                if value < (config_session.jitter_min or 0):
+                    raise ValueError("Jitter 최대값은 최소값보다 크거나 같아야 합니다.")
+                config_session.jitter_max = value
+                config_session.state = ConfigState.WAITING_FOR_MAX_MINUTES
+                await update.message.reply_text("예약 작업 최대 실행 시간(분)을 입력하세요. 예: 120")
+                return
+            if value <= 0 or not value.is_integer():
+                raise ValueError("최대 실행 시간은 1 이상의 정수(분)로 입력하세요.")
+            settings.korail_search_interval_seconds = config_session.interval or settings.korail_search_interval_seconds
+            settings.korail_search_jitter_min_seconds = config_session.jitter_min or 0.0
+            settings.korail_search_jitter_max_seconds = config_session.jitter_max or 0.0
+            settings.korail_max_search_minutes = int(value)
+            state.config_sessions.pop(chat_id, None)
+            await update.message.reply_text(
+                "조회 설정이 정상적으로 변경되었습니다.\n"
+                f"기본 주기: {settings.korail_search_interval_seconds:.3f}초\n"
+                f"Jitter 범위: {settings.korail_search_jitter_min_seconds:.3f}~"
+                f"{settings.korail_search_jitter_max_seconds:.3f}초\n"
+                f"최대 실행 시간: {settings.korail_max_search_minutes}분\n"
+                f"실제 조회 간격: {settings.korail_search_interval_seconds + settings.korail_search_jitter_min_seconds:.3f}~"
+                f"{settings.korail_search_interval_seconds + settings.korail_search_jitter_max_seconds:.3f}초"
+            )
+        except ValueError as exc:
+            message = str(exc) if str(exc) else "0 이상의 숫자를 입력하세요."
+            await update.message.reply_text(message)
 
     async def notify(self, job) -> None:
         await self.application.bot.send_message(job.chat_id, f"{job.status.value}\n{job.result_message}")

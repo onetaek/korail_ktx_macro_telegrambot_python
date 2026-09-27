@@ -50,7 +50,7 @@ class ReservationService:
                     await notify(job)
                     return
                 log.info("No available train; retrying: job_id=%s", job.job_id)
-                base_interval = max(1.0, settings.korail_search_interval_seconds)
+                base_interval = max(0.001, settings.korail_search_interval_seconds)
                 jitter_min, jitter_max = settings.search_jitter_range()
                 jitter = random.uniform(jitter_min, jitter_max)
                 wait_seconds = base_interval + jitter
