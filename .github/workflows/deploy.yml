@@ -65,15 +65,20 @@ jobs:
     needs: docker-build-and-push
 
     steps:
-      - name: Deploy to Linux server via SSH
-        uses: appleboy/ssh-action@v1.2.2
+      - name: Load SSH private key
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_PRIVATE_KEY }}
-          command_timeout: 2m
-          script: |
-            set -eu
-            cd '${{ env.DEPLOY_PATH }}'
-            chmod +x '${{ env.DEPLOY_SCRIPT }}'
-            './${{ env.DEPLOY_SCRIPT }}' '${{ github.sha }}'
+          ssh-private-key: ${{ secrets.SERVER_SSH_PRIVATE_KEY }}
+
+      - name: Deploy to Linux server via SSH
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SCRIPT: ${{ secrets.DEPLOY_SCRIPT }}
+        run: |
+          set -eu
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+          ssh "$SERVER_USER@$SERVER_HOST" \
+            "cd '$DEPLOY_PATH' && chmod +x '$DEPLOY_SCRIPT' && './$DEPLOY_SCRIPT' '${{ github.sha }}'"
