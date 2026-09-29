@@ -1,0 +1,9 @@
+services:
+  korail-macro:
+    image: ${IMAGE_NAME:-your-dockerhub-id/korail-ktx-macro}:${IMAGE_TAG:-latest}
+    container_name: korail-ktx-macro
+    env_file:
+      - .env
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s

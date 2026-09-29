@@ -60,6 +60,25 @@ python -m app.main
 
 로그에 Telegram polling 시작 메시지가 출력되면 정상 실행된 상태입니다. 종료하려면 `Ctrl+C`를 누릅니다.
 
+## Docker로 실행
+
+Docker Desktop이 실행 중인 상태에서 프로젝트 루트에서 실행합니다.
+
+```powershell
+docker compose up -d --build
+docker compose logs -f korail-macro
+```
+
+`.env` 파일은 이미지에 포함하지 않고 Compose가 컨테이너 실행 시 주입합니다. 중지하려면 다음을 실행합니다.
+
+```powershell
+docker compose down
+```
+
+## 서버 배포
+
+Docker를 사용해 컨테이너 환경에 배포할 수 있습니다. Linux 서버뿐 아니라 Docker Desktop 또는 WSL2가 구성된 Windows 환경에서도 Docker Compose와 `.env` 파일을 준비한 뒤 Docker 이미지를 pull하여 컨테이너로 실행합니다.
+
 ## Telegram 명령
 
 - `/start`: 예약 조건 입력 시작
