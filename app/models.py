@@ -65,6 +65,7 @@ class ReservationJob:
     status: JobStatus = JobStatus.CREATED
     result_message: str | None = None
     reservation_number: str | None = None
+    attempt_count: int = 0
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
     cancel_event: Any = None

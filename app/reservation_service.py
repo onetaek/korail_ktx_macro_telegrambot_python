@@ -28,9 +28,14 @@ class ReservationService:
         if not job: return False
         job.cancel_event.set()
         task = state.running_tasks.get(job_id)
-        if task and not task.done(): task.cancel()
-        job.status = JobStatus.CANCELLED
-        job.completed_at = datetime.now(timezone.utc)
+        if not task or task.done():
+            job.status = JobStatus.CANCELLED
+            job.completed_at = datetime.now(timezone.utc)
+        else:
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                pass
         log.info("Reservation job cancelled: job_id=%s", job_id)
         return True
 
@@ -41,11 +46,18 @@ class ReservationService:
         try:
             await asyncio.to_thread(service.login, job.session)
             while asyncio.get_running_loop().time() < deadline:
-                if job.cancel_event.is_set(): return
+                if job.cancel_event.is_set():
+                    job.status = JobStatus.CANCELLED
+                    return
+                job.attempt_count += 1
+                log.info("Reservation attempt started: job_id=%s, attempt=%d", job.job_id, job.attempt_count)
                 result = await asyncio.to_thread(service.reserve_once, job.session)
+                if job.cancel_event.is_set():
+                    job.status = JobStatus.CANCELLED
+                    return
                 if result:
                     job.status = JobStatus.RESERVED
-                    job.result_message = result.message
+                    job.result_message = f"{result.message} (예약 시도 {job.attempt_count}회)"
                     job.reservation_number = result.reservation_number
                     await notify(job)
                     return
@@ -58,14 +70,14 @@ class ReservationService:
                          base_interval, jitter, wait_seconds)
                 await asyncio.sleep(wait_seconds)
             job.status = JobStatus.FAILED
-            job.result_message = "검색 시간 내 예약 가능한 열차를 찾지 못했습니다."
+            job.result_message = f"검색 시간 내 예약 가능한 열차를 찾지 못했습니다. (예약 시도 {job.attempt_count}회)"
             await notify(job)
         except asyncio.CancelledError:
             job.status = JobStatus.CANCELLED
             raise
         except Exception as exc:
             job.status = JobStatus.FAILED
-            job.result_message = str(exc)
+            job.result_message = f"{str(exc)} (예약 시도 {job.attempt_count}회)"
             log.exception("Reservation failed: job_id=%s", job.job_id)
             await notify(job)
         finally:

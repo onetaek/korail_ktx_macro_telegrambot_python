@@ -33,6 +33,8 @@ data/
 build/
 dist/
 *.egg-info/
+*.spec
+pyinstaller-build.log
 
 # OS files
 .DS_Store
