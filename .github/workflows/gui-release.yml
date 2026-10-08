@@ -16,6 +16,18 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag is based on master
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        run: |
+          git fetch origin master
+          git merge-base --is-ancestor "$GITHUB_SHA" "origin/master" || {
+            echo "The release tag must point to a commit contained in master."
+            exit 1
+          }
 
       - name: Set up Python
         uses: actions/setup-python@v5
