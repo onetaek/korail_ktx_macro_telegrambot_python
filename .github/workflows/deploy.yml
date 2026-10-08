@@ -1,18 +1,19 @@
 name: CI/CD Pipeline
 
 on:
-  push:
+  pull_request:
     branches:
       - master
+    types:
+      - closed
   workflow_dispatch:
 
 env:
   IMAGE_NAME: ${{ secrets.DOCKER_HUB_USERNAME }}/${{ secrets.DOCKER_HUB_IMAGE_NAME }}
-  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-  DEPLOY_SCRIPT: ${{ secrets.DEPLOY_SCRIPT }}
 
 jobs:
   build-and-test:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true }}
     runs-on: ubuntu-latest
 
     steps:
@@ -32,6 +33,7 @@ jobs:
         run: python -m pytest -q
 
   docker-build-and-push:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true }}
     runs-on: ubuntu-latest
     needs: build-and-test
 
@@ -61,6 +63,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy-to-server:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true }}
     runs-on: ubuntu-latest
     needs: docker-build-and-push
 
