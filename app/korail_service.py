@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from .config import settings
-from .models import ConversationSession
+from .models import ConversationSession, PaymentStatus
 
 log = logging.getLogger(__name__)
 
@@ -13,6 +13,7 @@ log = logging.getLogger(__name__)
 class ReservationResult:
     message: str
     reservation_number: str | None = None
+    payment_status: PaymentStatus = PaymentStatus.NOT_REQUESTED
 
 
 class KorailService:
@@ -37,7 +38,7 @@ class KorailService:
         self.client.login(settings.korail_id, settings.korail_password)
         log.info("Korail login completed")
 
-    def reserve_once(self, session: ConversationSession) -> ReservationResult | None:
+    def reserve_once(self, session: ConversationSession, card_payment=None) -> ReservationResult | None:
         query = self.query_type(
             departure_station_code=session.source_station,
             arrival_station_code=session.destination_station,
@@ -86,7 +87,28 @@ class KorailService:
                     raise
                 number = self._field(hold, "pnr") or self._field(hold, "reservation_number")
                 log.info("Reservation completed: reservation_number_present=%s", bool(number))
-                return ReservationResult("미결제 예약이 완료되었습니다. 공식 앱/웹에서 결제를 진행하세요.", number)
+                if card_payment is None:
+                    return ReservationResult("미결제 예약이 완료되었습니다. 공식 앱/웹에서 결제를 진행하세요.", number)
+                log.info("Card payment started: reservation_number_present=%s", bool(number))
+                try:
+                    payment = self.client.pay_with_card(hold, card_payment)
+                except Exception:
+                    log.warning("Card payment request failed; unpaid reservation retained")
+                    return ReservationResult(
+                        f"예약은 완료되었지만 카드 결제 요청에 실패했습니다. 공식 앱/웹에서 결제하세요.",
+                        number,
+                        PaymentStatus.FAILED,
+                    )
+                if getattr(payment, "str_result", None) == "SUCC":
+                    log.info("Card payment completed: reservation_number_present=%s", bool(number))
+                    return ReservationResult("예약 및 카드 결제가 완료되었습니다.", number, PaymentStatus.PAID)
+                message = getattr(payment, "display_message", None) or getattr(payment, "h_msg_txt", None) or "카드 결제가 거절되었습니다."
+                log.warning("Card payment failed: reservation_number_present=%s", bool(number))
+                return ReservationResult(
+                    f"예약은 완료되었지만 카드 결제에 실패했습니다: {message} 공식 앱/웹에서 결제하세요.",
+                    number,
+                    PaymentStatus.FAILED,
+                )
         return None
 
     def preview(self, session: ConversationSession) -> list[object]:

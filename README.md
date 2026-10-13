@@ -5,7 +5,8 @@ KORAIL 열차를 조회하고 선택한 열차의 미결제 예약을 시도하�
 - GUI 방식: Windows 사용자가 가장 쉽게 사용
 - Telegram 방식: Telegram 채팅으로 원격 사용
 - 서버 방식: Linux 서버에서 Telegram 봇을 상시 실행
-- 결제·환불은 지원하지 않음
+- GUI에서 선택적으로 카드 자동 결제 지원
+- 환불은 지원하지 않음
 - 예약 상태는 메모리에만 저장
 
 ## 1. GUI로 사용하기
@@ -166,6 +167,15 @@ TELEGRAM_BOT_TOKEN=BotFather에서_받은_토큰
 TELEGRAM_ALLOWED_CHAT_IDS=본인의_숫자_chat_id
 KORAIL_ID=코레일_아이디
 KORAIL_PASSWORD=코레일_비밀번호
+
+# Telegram 예약 자동 카드 결제 (선택)
+KORAIL_AUTO_PAYMENT_ENABLED=false
+KORAIL_CARD_NUMBER=카드번호
+KORAIL_CARD_PASSWORD=카드비밀번호앞2자리
+KORAIL_CARD_EXPIRE=YYMM
+KORAIL_CARD_BIRTHDAY=생년월일또는사업자번호앞6자리
+KORAIL_CARD_INSTALLMENT=0
+KORAIL_CARD_TYPE=J
 ```
 
 ### 이미지 실행
@@ -239,4 +249,4 @@ python -m pytest
 
 `korail-mobile-api`는 KORAIL의 공식 공개 API가 아닌 비공식 클라이언트입니다. 예약 요청은 실제 계정 상태를 변경할 수 있으므로 개인 계정으로 사용하고, KORAIL 정책과 서버 부하를 고려해야 합니다.
 
-프로그램이 종료되면 메모리에 저장된 대화와 예약 작업은 사라집니다. 결제와 환불은 자동으로 진행하지 않습니다.
+프로그램이 종료되면 메모리에 저장된 대화와 예약 작업은 사라집니다. `KORAIL_AUTO_PAYMENT_ENABLED=true`인 경우 Telegram 예약 성공 직후 카드 결제를 시도하며, 카드 정보는 환경변수에서 읽어 메모리에서만 사용합니다. 결제 실패 시 미결제 예약을 유지합니다. 환불은 지원하지 않습니다.

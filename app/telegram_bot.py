@@ -15,6 +15,7 @@ log = logging.getLogger(__name__)
 class TelegramBot:
     def __init__(self) -> None:
         self.service = ReservationService()
+        self.card_payment = settings.card_payment()
         self.application = Application.builder().token(settings.telegram_bot_token).build()
         self.application.add_handler(CommandHandler("start", self.start))
         self.application.add_handler(CommandHandler("status", self.status))
@@ -49,7 +50,7 @@ class TelegramBot:
             if session.state == ConversationState.WAITING_FOR_TRAIN_SELECTION:
                 await self.send_train_preview(session, chat_id)
             if session.state == ConversationState.RESERVING:
-                job = self.service.create(chat_id, session)
+                job = self.service.create(chat_id, session, self.card_payment)
                 session.job_id = job.job_id
                 self.service.start(job, self.notify)
         except ValueError as exc:

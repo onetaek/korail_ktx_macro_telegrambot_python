@@ -41,6 +41,12 @@ class JobStatus(str, Enum):
     CANCELLED = "CANCELLED"
 
 
+class PaymentStatus(str, Enum):
+    NOT_REQUESTED = "NOT_REQUESTED"
+    PAID = "PAID"
+    FAILED = "FAILED"
+
+
 @dataclass
 class ConversationSession:
     state: ConversationState = ConversationState.IDLE
@@ -69,3 +75,5 @@ class ReservationJob:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
     cancel_event: Any = None
+    card_payment: Any = None
+    payment_status: PaymentStatus = PaymentStatus.NOT_REQUESTED

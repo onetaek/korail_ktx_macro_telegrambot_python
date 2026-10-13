@@ -9,7 +9,7 @@ from telegram import Bot
 
 from .config import settings
 from .korail_service import KorailService
-from .models import ConversationSession, JobStatus
+from .models import ConversationSession, JobStatus, PaymentStatus
 from .reservation_service import ReservationService
 
 
@@ -48,12 +48,14 @@ class KorailGui:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("KORAIL KTX 예약")
-        self.root.geometry("760x760")
+        self.root.geometry("760x800")
+        self.root.minsize(760, 900)
         self.runner = _AsyncRunner()
         self.reservation_service = ReservationService()
         self.session: ConversationSession | None = None
         self.job = None
         self.notification_config = None
+        self.card_payment = None
         self.trains = []
         self.attempt_var = tk.StringVar(value="예약 시도: 0회")
         self.entries = {}
@@ -126,14 +128,39 @@ class KorailGui:
             variable=self.telegram_notify,
             command=self._on_notification_toggle,
         )
-        self.telegram_notify_check.grid(row=5, column=0, columnspan=2, sticky="w", padx=4, pady=4)
-        ttk.Label(form, text="Telegram Bot Token").grid(row=5, column=2, sticky="w", padx=4, pady=4)
+        self.telegram_notify_check.grid(row=5, column=0, columnspan=4, sticky="w", padx=4, pady=4)
+        ttk.Label(form, text="Telegram Bot Token").grid(row=6, column=0, sticky="w", padx=4, pady=4)
         self.telegram_token_entry = ttk.Entry(form, width=22, show="*")
-        self.telegram_token_entry.grid(row=5, column=3, padx=4, pady=4)
+        self.telegram_token_entry.grid(row=6, column=1, padx=4, pady=4)
         ttk.Label(form, text="Telegram Chat ID").grid(row=6, column=2, sticky="w", padx=4, pady=4)
         self.telegram_chat_id_entry = ttk.Entry(form, width=22)
         self.telegram_chat_id_entry.grid(row=6, column=3, padx=4, pady=4)
         self._set_notification_inputs_state()
+
+        self.auto_payment = tk.BooleanVar(value=False)
+        self.auto_payment_check = ttk.Checkbutton(
+            form, text="예약 완료 후 자동 결제", variable=self.auto_payment,
+            command=self._on_payment_toggle,
+        )
+        self.auto_payment_check.grid(row=7, column=0, columnspan=4, sticky="w", padx=4, pady=4)
+        self.payment_entries = {}
+        payment_fields = [
+            (8, 0, "카드번호", "card_number", False),
+            (8, 2, "카드 비밀번호 앞 2자리", "card_password", True),
+            (9, 0, "유효기간 YYMM", "card_expire", False),
+            (9, 2, "생년월일/사업자번호 앞 6자리", "birthday", False),
+            (10, 0, "할부개월(0=일시불)", "installment", False),
+        ]
+        for row, col, label, key, masked in payment_fields:
+            ttk.Label(form, text=label).grid(row=row, column=col, sticky="w", padx=4, pady=4)
+            entry = ttk.Entry(form, width=22, show="*" if masked else "")
+            entry.grid(row=row, column=col + 1, padx=4, pady=4)
+            self.payment_entries[key] = entry
+        ttk.Label(form, text="카드 유형").grid(row=10, column=2, sticky="w", padx=4, pady=4)
+        self.card_type = tk.StringVar(value="개인")
+        self.card_type_combo = ttk.Combobox(form, textvariable=self.card_type, values=["개인", "법인"], state="readonly", width=19)
+        self.card_type_combo.grid(row=10, column=3, padx=4, pady=4)
+        self._set_payment_inputs_state()
 
         runtime = ttk.LabelFrame(frame, text="조회 설정", padding=8)
         runtime.pack(fill="x", pady=(8, 0))
@@ -161,7 +188,7 @@ class KorailGui:
         self.train_list.pack(fill="x", pady=4)
         ttk.Label(frame, textvariable=self.attempt_var).pack(anchor="w")
         ttk.Label(frame, text="로그").pack(anchor="w")
-        self.log = tk.Text(frame, height=14, state="disabled")
+        self.log = tk.Text(frame, height=22, state="disabled")
         self.log.pack(fill="both", expand=True)
         for entry in self.entries.values():
             entry.bind("<KeyRelease>", self._on_input_change, add="+")
@@ -197,6 +224,40 @@ class KorailGui:
     def _on_notification_toggle(self):
         self._set_notification_inputs_state()
         self._update_button_states()
+
+    def _on_payment_toggle(self):
+        self._set_payment_inputs_state()
+        self._update_button_states()
+
+    def _set_payment_inputs_state(self):
+        state = "normal" if self.auto_payment.get() else "disabled"
+        for entry in self.payment_entries.values():
+            entry.configure(state=state)
+        self.card_type_combo.configure(state="readonly" if self.auto_payment.get() else "disabled")
+
+    def _payment_values(self):
+        if not self.auto_payment.get():
+            return None
+        values = {key: entry.get().strip() for key, entry in self.payment_entries.items()}
+        if not values["card_number"].isdigit() or not 12 <= len(values["card_number"]) <= 19:
+            raise ValueError("카드번호는 숫자 12~19자리로 입력하세요.")
+        if not values["card_password"].isdigit() or len(values["card_password"]) != 2:
+            raise ValueError("카드 비밀번호 앞 2자리는 숫자 2자리로 입력하세요.")
+        if not re.fullmatch(r"\d{4}", values["card_expire"]) or not 1 <= int(values["card_expire"][2:]) <= 12:
+            raise ValueError("카드 유효기간은 YYMM 형식으로 입력하세요.")
+        if not re.fullmatch(r"\d{6}", values["birthday"]):
+            raise ValueError("생년월일/사업자번호는 숫자 6자리로 입력하세요.")
+        if not re.fullmatch(r"0|(?:0[1-9]|1[0-9]|2[0-4])", values["installment"]):
+            raise ValueError("할부개월은 0 또는 01~24로 입력하세요.")
+        from korail_mobile_api import CardPayment
+        return CardPayment(
+            card_number=values["card_number"],
+            card_password=values["card_password"],
+            card_expire=values["card_expire"],
+            birthday=values["birthday"],
+            installment=values["installment"],
+            card_type="J" if self.card_type.get() == "개인" else "S",
+        )
 
     def _set_notification_inputs_state(self):
         state = "normal" if self.telegram_notify.get() else "disabled"
@@ -254,6 +315,7 @@ class KorailGui:
         if max_minutes <= 0 or not 1 <= passengers <= 9:
             raise ValueError("최대 실행 시간과 승객 수를 확인하세요.")
         self._notification_values()
+        self._payment_values()
         settings.korail_id = v["korail_id"]
         settings.korail_password = v["password"]
         settings.korail_search_interval_seconds = interval
@@ -306,7 +368,8 @@ class KorailGui:
                 raise ValueError("예약할 열차를 목록에서 하나 이상 선택하세요.")
             self.session.selected_train_numbers = [str(getattr(self.trains[index - 1], "train_no", "")) for index in selected]
             self.notification_config = self._notification_values()
-            self.job = self.reservation_service.create(0, self.session)
+            self.card_payment = self._payment_values()
+            self.job = self.reservation_service.create(0, self.session, self.card_payment)
             self.attempt_var.set("예약 시도: 0회")
             self.runner.submit(self._start_reservation_async())
             self._update_button_states()
@@ -335,8 +398,9 @@ class KorailGui:
     def _telegram_message(self, job):
         session = job.session
         reservation = f"\n예약 번호: {job.reservation_number}" if job.reservation_number else ""
+        heading = "⚠️ 예약은 완료되었지만 카드 결제에 실패했습니다." if job.payment_status == PaymentStatus.FAILED else "✅ 코레일 예약이 완료되었습니다."
         return (
-            "✅ 코레일 예약이 완료되었습니다.\n"
+            f"{heading}\n"
             f"{job.result_message or ''}{reservation}\n\n"
             f"출발일: {session.departure_date}\n"
             f"출발: {session.source_station}\n"
