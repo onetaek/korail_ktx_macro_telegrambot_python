@@ -5,6 +5,8 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from telegram import Bot
+
 from .config import settings
 from .korail_service import KorailService
 from .models import ConversationSession, JobStatus
@@ -51,6 +53,7 @@ class KorailGui:
         self.reservation_service = ReservationService()
         self.session: ConversationSession | None = None
         self.job = None
+        self.notification_config = None
         self.trains = []
         self.attempt_var = tk.StringVar(value="예약 시도: 0회")
         self.entries = {}
@@ -116,6 +119,22 @@ class KorailGui:
         self.seat_option_combo.grid(row=4, column=3, padx=4)
         self.seat_option_combo.bind("<<ComboboxSelected>>", self._on_input_change, add="+")
 
+        self.telegram_notify = tk.BooleanVar(value=False)
+        self.telegram_notify_check = ttk.Checkbutton(
+            form,
+            text="예약 완료 시 텔레그램 알림",
+            variable=self.telegram_notify,
+            command=self._on_notification_toggle,
+        )
+        self.telegram_notify_check.grid(row=5, column=0, columnspan=2, sticky="w", padx=4, pady=4)
+        ttk.Label(form, text="Telegram Bot Token").grid(row=5, column=2, sticky="w", padx=4, pady=4)
+        self.telegram_token_entry = ttk.Entry(form, width=22, show="*")
+        self.telegram_token_entry.grid(row=5, column=3, padx=4, pady=4)
+        ttk.Label(form, text="Telegram Chat ID").grid(row=6, column=2, sticky="w", padx=4, pady=4)
+        self.telegram_chat_id_entry = ttk.Entry(form, width=22)
+        self.telegram_chat_id_entry.grid(row=6, column=3, padx=4, pady=4)
+        self._set_notification_inputs_state()
+
         runtime = ttk.LabelFrame(frame, text="조회 설정", padding=8)
         runtime.pack(fill="x", pady=(8, 0))
         runtime_fields = [
@@ -175,6 +194,26 @@ class KorailGui:
             return ""
         return entry.get().strip()
 
+    def _on_notification_toggle(self):
+        self._set_notification_inputs_state()
+        self._update_button_states()
+
+    def _set_notification_inputs_state(self):
+        state = "normal" if self.telegram_notify.get() else "disabled"
+        self.telegram_token_entry.configure(state=state)
+        self.telegram_chat_id_entry.configure(state=state)
+
+    def _notification_values(self):
+        if not self.telegram_notify.get():
+            return None
+        token = self.telegram_token_entry.get().strip()
+        chat_id = self.telegram_chat_id_entry.get().strip()
+        if not token or not chat_id:
+            raise ValueError("텔레그램 알림을 사용하려면 Bot Token과 Chat ID를 입력하세요.")
+        if not re.fullmatch(r"-?\d+", chat_id):
+            raise ValueError("Telegram Chat ID는 숫자 형식이어야 합니다.")
+        return token, int(chat_id)
+
     def _inputs_complete(self):
         required = ("korail_id", "password", "date", "source", "destination", "start", "max_time", "interval", "jitter_min", "jitter_max", "max_minutes", "passengers")
         return all(self._entry_value(key) for key in required)
@@ -214,6 +253,7 @@ class KorailGui:
         max_minutes = int(v["max_minutes"]); passengers = int(v["passengers"])
         if max_minutes <= 0 or not 1 <= passengers <= 9:
             raise ValueError("최대 실행 시간과 승객 수를 확인하세요.")
+        self._notification_values()
         settings.korail_id = v["korail_id"]
         settings.korail_password = v["password"]
         settings.korail_search_interval_seconds = interval
@@ -265,6 +305,7 @@ class KorailGui:
             if not selected:
                 raise ValueError("예약할 열차를 목록에서 하나 이상 선택하세요.")
             self.session.selected_train_numbers = [str(getattr(self.trains[index - 1], "train_no", "")) for index in selected]
+            self.notification_config = self._notification_values()
             self.job = self.reservation_service.create(0, self.session)
             self.attempt_var.set("예약 시도: 0회")
             self.runner.submit(self._start_reservation_async())
@@ -278,7 +319,33 @@ class KorailGui:
 
     async def notify(self, job):
         self.root.after(0, self._append_log, f"예약 결과: {job.status.value} - {job.result_message}")
+        if job.status == JobStatus.RESERVED and self.notification_config:
+            token, chat_id = self.notification_config
+            try:
+                await self._send_telegram_notification(job, token, chat_id)
+                self.root.after(0, self._append_log, "텔레그램 예약 완료 알림을 전송했습니다.")
+            except Exception as exc:
+                self.root.after(0, self._append_log, f"텔레그램 알림 전송 실패: {exc}")
         self.root.after(0, self._reservation_finished)
+
+    async def _send_telegram_notification(self, job, token, chat_id):
+        async with Bot(token=token) as bot:
+            await bot.send_message(chat_id=chat_id, text=self._telegram_message(job))
+
+    def _telegram_message(self, job):
+        session = job.session
+        reservation = f"\n예약 번호: {job.reservation_number}" if job.reservation_number else ""
+        return (
+            "✅ 코레일 예약이 완료되었습니다.\n"
+            f"{job.result_message or ''}{reservation}\n\n"
+            f"출발일: {session.departure_date}\n"
+            f"출발: {session.source_station}\n"
+            f"도착: {session.destination_station}\n"
+            f"출발 시간: {session.start_time}\n"
+            f"열차: {session.train_type}\n"
+            f"좌석: {session.seat_option}\n"
+            f"인원: {session.passenger_count}명"
+        )
 
     def _reservation_finished(self):
         self._update_button_states()
