@@ -60,7 +60,8 @@ jobs:
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # GitHub Actions 캐시 저장소 문제로 이미지 push와 배포가 실패하지 않도록 합니다.
+          cache-to: type=gha,mode=max,ignore-error=true
 
   deploy-to-server:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true }}
