@@ -6,15 +6,15 @@ from datetime import datetime, timezone
 
 from .config import settings
 from .korail_service import KorailService
-from .models import JobStatus, ReservationJob, ConversationSession
+from .models import JobStatus, PaymentStatus, ReservationJob, ConversationSession
 from . import state
 
 log = logging.getLogger(__name__)
 
 
 class ReservationService:
-    def create(self, chat_id: int, session: ConversationSession) -> ReservationJob:
-        job = ReservationJob(str(uuid.uuid4()), chat_id, session, cancel_event=asyncio.Event())
+    def create(self, chat_id: int, session: ConversationSession, card_payment=None) -> ReservationJob:
+        job = ReservationJob(str(uuid.uuid4()), chat_id, session, cancel_event=asyncio.Event(), card_payment=card_payment)
         state.reservation_jobs[job.job_id] = job
         log.info("Reservation job created: job_id=%s, chat_id=%s", job.job_id, chat_id)
         return job
@@ -51,7 +51,7 @@ class ReservationService:
                     return
                 job.attempt_count += 1
                 log.info("Reservation attempt started: job_id=%s, attempt=%d", job.job_id, job.attempt_count)
-                result = await asyncio.to_thread(service.reserve_once, job.session)
+                result = await asyncio.to_thread(service.reserve_once, job.session, job.card_payment)
                 if job.cancel_event.is_set():
                     job.status = JobStatus.CANCELLED
                     return
@@ -59,6 +59,7 @@ class ReservationService:
                     job.status = JobStatus.RESERVED
                     job.result_message = f"{result.message} (예약 시도 {job.attempt_count}회)"
                     job.reservation_number = result.reservation_number
+                    job.payment_status = result.payment_status
                     await notify(job)
                     return
                 log.info("No available train; retrying: job_id=%s", job.job_id)

@@ -18,6 +18,10 @@ async def main() -> None:
         raise RuntimeError("TELEGRAM_BOT_TOKEN과 TELEGRAM_ALLOWED_CHAT_IDS를 설정해야 합니다.")
     if not settings.korail_id or not settings.korail_password:
         raise RuntimeError("KORAIL_ID와 KORAIL_PASSWORD를 설정해야 합니다.")
+    try:
+        settings.card_payment()
+    except ValueError as exc:
+        raise RuntimeError(f"자동 결제 환경변수 설정이 잘못되었습니다: {exc}") from exc
 
     telegram_bot = TelegramBot()
     await telegram_bot.run()
