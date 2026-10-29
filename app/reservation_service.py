@@ -26,6 +26,18 @@ class ReservationService:
     async def cancel(self, job_id: str) -> bool:
         job = state.reservation_jobs.get(job_id)
         if not job: return False
+        if job.status == JobStatus.RESERVED and job.reservation_number and settings.korail_provider.strip().lower() == "pykorail":
+            service = KorailService()
+            try:
+                await asyncio.to_thread(service.login, job.session)
+                await asyncio.to_thread(service.cancel_reservation, job.reservation_number)
+                job.status = JobStatus.CANCELLED
+                job.result_message = "예약번호로 미결제 예약을 취소했습니다."
+                job.completed_at = datetime.now(timezone.utc)
+                log.info("Reserved hold cancelled: job_id=%s", job.job_id)
+                return True
+            finally:
+                await asyncio.to_thread(service.close)
         job.cancel_event.set()
         task = state.running_tasks.get(job_id)
         if not task or task.done():

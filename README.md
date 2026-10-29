@@ -6,6 +6,7 @@ KORAIL 열차를 조회하고 선택한 열차의 미결제 예약을 시도하�
 - Telegram 방식: Telegram 채팅으로 원격 사용
 - 서버 방식: Linux 서버에서 Telegram 봇을 상시 실행
 - GUI에서 선택적으로 카드 자동 결제 지원
+- GUI에서 선택적으로 Telegram 예약 완료 알림 지원
 - 환불은 지원하지 않음
 - 예약 상태는 메모리에만 저장
 
@@ -36,6 +37,8 @@ GUI에서 다음 정보를 입력합니다.
 - 출발·종료 시간
 - 열차 종류·좌석 옵션
 - 조회 주기·Jitter·최대 실행 시간
+- 예약 완료 시 Telegram 알림 여부와 Bot Token·Chat ID
+- 예약 완료 후 카드 자동 결제 여부와 카드 정보
 
 사용 순서:
 
@@ -46,43 +49,6 @@ GUI에서 다음 정보를 입력합니다.
 5. 예약을 중지하려면 `3. 예약 취소` 클릭
 
 GUI는 KORAIL 인증정보를 파일에 저장하지 않고 실행 중 메모리에서만 사용합니다.
-
-### GUI 실행파일 직접 만들기
-
-개발 환경에서 Python과 Git을 준비한 뒤 실행합니다.
-
-```powershell
-git clone https://github.com/onetaek/korail_ktx_macro_telegrambot_python.git
-cd korail_ktx_macro_telegrambot_python
-
-python -m venv .venv
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\\.venv\\Scripts\\Activate.ps1
-
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
-pyinstaller --noconfirm --clean --onefile --windowed --name KorailReservationGui gui_main.py
-```
-
-생성된 실행파일:
-
-```text
-dist\\KorailReservationGui.exe
-```
-
-### GitHub Release 등록
-
-버전 태그를 GitHub에 push하면 GitHub Actions가 Windows 환경에서 GUI 실행파일을 자동으로 빌드하고 Release에 첨부합니다.
-
-```powershell
-git add .
-git commit -m "release: prepare GUI executable distribution"
-git tag v1.0.0
-git push origin HEAD
-git push origin v1.0.0
-```
-
-이후 GitHub 저장소의 `Releases`에서 `KorailReservationGui.exe`를 사용자에게 배포합니다. Release workflow 파일은 [gui-release.yml](.github/workflows/gui-release.yml)입니다.
 
 ## 2. Telegram으로 사용하기
 
@@ -102,7 +68,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-`korail-mobile-api`는 PyPI가 아닌 GitHub 저장소에서 `requirements.txt`를 통해 설치됩니다.
+`pykorail`과 Windows·TLS 호환을 위한 `curl-cffi`가 `requirements.txt`를 통해 설치됩니다.
 
 ### 환경변수 설정
 
@@ -138,7 +104,7 @@ Telegram 명령:
 
 ## 3. Docker로 서버에 배포하기
 
-서버에는 Docker와 Docker Compose Plugin이 설치되어 있어야 합니다. `Dockerfile`은 Python 3.11 기반 이미지에서 GitHub의 `korail-mobile-api`를 설치하고, 비-root 사용자로 Telegram 봇을 실행합니다.
+서버에는 Docker와 Docker Compose Plugin이 설치되어 있어야 합니다. `Dockerfile`은 Python 3.11 기반 이미지에서 `pykorail`을 설치하고, 비-root 사용자로 Telegram 봇을 실행합니다.
 
 ### 서버 준비
 
@@ -210,22 +176,6 @@ docker compose -f docker-compose.prod.yml restart
 docker compose -f docker-compose.prod.yml down
 ```
 
-### 서버에서 직접 이미지 빌드하기
-
-Docker Hub에 이미지를 올리지 않고 서버에서 직접 빌드할 수도 있습니다.
-
-```bash
-docker build -t korail-ktx-macro:local .
-IMAGE_NAME=korail-ktx-macro IMAGE_TAG=local docker compose -f docker-compose.prod.yml up -d
-```
-
-코드나 의존성이 변경되면 다시 빌드합니다.
-
-```bash
-docker build --no-cache -t korail-ktx-macro:local .
-IMAGE_NAME=korail-ktx-macro IMAGE_TAG=local docker compose -f docker-compose.prod.yml up -d --force-recreate
-```
-
 ## 조회 설정
 
 초기값은 `.env`에서 설정합니다.
@@ -239,14 +189,8 @@ KORAIL_MAX_SEARCH_MINUTES=120
 
 GUI에서는 입력창에서 직접 변경할 수 있습니다. Telegram에서는 `/config` 입력 후 기본 주기, Jitter 최소값, Jitter 최대값, 최대 실행 시간을 순서대로 입력합니다.
 
-## 테스트
-
-```powershell
-python -m pytest
-```
-
 ## 주의 사항
 
-`korail-mobile-api`는 KORAIL의 공식 공개 API가 아닌 비공식 클라이언트입니다. 예약 요청은 실제 계정 상태를 변경할 수 있으므로 개인 계정으로 사용하고, KORAIL 정책과 서버 부하를 고려해야 합니다.
+`pykorail`은 KORAIL의 공식 공개 API가 아닌 비공식 클라이언트입니다. 예약 요청은 실제 계정 상태를 변경할 수 있으므로 개인 계정으로 사용하고, KORAIL 정책과 서버 부하를 고려해야 합니다.
 
-프로그램이 종료되면 메모리에 저장된 대화와 예약 작업은 사라집니다. `KORAIL_AUTO_PAYMENT_ENABLED=true`인 경우 Telegram 예약 성공 직후 카드 결제를 시도하며, 카드 정보는 환경변수에서 읽어 메모리에서만 사용합니다. 결제 실패 시 미결제 예약을 유지합니다. 환불은 지원하지 않습니다.
+프로그램이 종료되면 메모리에 저장된 대화와 예약 작업은 사라집니다. Telegram 방식에서 `KORAIL_AUTO_PAYMENT_ENABLED=true`인 경우 예약 성공 직후 카드 결제를 시도하며, 카드 정보는 환경변수에서 읽어 메모리에서만 사용합니다. GUI 방식에서는 화면에서 입력한 카드 정보로 자동 결제를 선택할 수 있으며 파일에 저장하지 않습니다. 결제 실패 시 미결제 예약과 예약번호를 유지합니다. 예약 완료 후에는 GUI의 `3. 예약 취소` 버튼 또는 Telegram의 `/cancel` 명령으로 미결제 예약을 취소할 수 있습니다. 환불은 지원하지 않습니다.
