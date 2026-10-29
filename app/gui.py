@@ -47,6 +47,9 @@ class _AsyncRunner:
 class KorailGui:
     def __init__(self, root: tk.Tk):
         self.root = root
+        # GUI uses the current provider directly; account, Telegram, and card
+        # values are collected from the form and kept in memory for this run.
+        settings.korail_provider = "pykorail"
         self.root.title("KORAIL KTX 예약")
         self.root.geometry("760x800")
         self.root.minsize(760, 900)
@@ -280,7 +283,7 @@ class KorailGui:
         return all(self._entry_value(key) for key in required)
 
     def _reservation_running(self):
-        return self.job is not None and self.job.status in {JobStatus.CREATED, JobStatus.RUNNING}
+        return self.job is not None and self.job.status in {JobStatus.CREATED, JobStatus.RUNNING, JobStatus.RESERVED}
 
     def _update_button_states(self):
         running = self._reservation_running()

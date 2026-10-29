@@ -2,10 +2,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # Migration switch. Keep the legacy provider until pykorail read-only
+    # verification is complete; reservation and payment are not changed by
+    # this setting yet.
+    korail_provider: str = "pykorail"
     telegram_bot_token: str = ""
     telegram_allowed_chat_ids: str = ""
     korail_id: str = ""
     korail_password: str = ""
+    korail_app_version: str = "7.0.8"
     korail_search_interval_seconds: float = 1.0
     korail_search_jitter_min_seconds: float = 0.0
     korail_search_jitter_max_seconds: float = 0.0
